@@ -9,12 +9,13 @@ import (
 )
 
 type TranscriptData struct {
-	URL     string        `json:"url"`
+	ID      string           `json:"id"`
+	URL     string           `json:"url"`
 	Lines   []TranscriptLine `json:"lines"`
-	Length  string        `json:"length"`
-	Title   string        `json:"title"`
-	Author  string        `json:"author"`
-	Date    string        `json:"date"`
+	Length  string           `json:"length"`
+	Title   string           `json:"title"`
+	Author  string           `json:"author"`
+	Date    string           `json:"date"`
 }
 
 type TranscriptLine struct {
