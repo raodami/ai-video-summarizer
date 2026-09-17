@@ -270,8 +270,10 @@ export default function Home() {
                   {r.data && (
                     <button
                       onClick={() => {
-                        setResult(r.data);
-                        setBatchMode(false);
+                        if (r.data) {
+                          setResult(r.data);
+                          setBatchMode(false);
+                        }
                       }}
                       className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm flex-shrink-0"
                     >
