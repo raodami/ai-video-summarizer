@@ -191,23 +191,17 @@ func fetchFromYouTubeRaw(url string) (*TranscriptData, error) {
 
 // extractTitle gets video title from HTML
 func extractTitle(html string) string {
-	patterns := []string{
-		`<title>([^<]+)</title>`,
-		`"title":"([^"]+)"`,
-		`data-tooltip-text="([^"]+)"`,
+	// Simple extraction - find title between <title> tags
+	startIdx := strings.Index(html, "<title>")
+	if startIdx == -1 {
+		return "YouTube Video"
 	}
-	for _, pattern := range patterns {
-		idx := strings.Index(html, ">")
-		if idx > 0 {
-			title := html[idx+1:]
-			endIdx := strings.Index(title, "<")
-			if endIdx > 0 {
-				title = title[:endIdx]
-			}
-			return strings.TrimSpace(title)
-		}
+	startIdx += len("<title>")
+	endIdx := strings.Index(html[startIdx:], "</title>")
+	if endIdx == -1 {
+		return "YouTube Video"
 	}
-	return "YouTube Video"
+	return strings.TrimSpace(html[startIdx : startIdx+endIdx])
 }
 
 // extractAuthor gets channel name from HTML

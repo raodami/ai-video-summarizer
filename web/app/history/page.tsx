@@ -9,6 +9,7 @@ import {
   PencilSquareIcon,
   CommandLineIcon,
   EyeIcon,
+  PlusIcon,
 } from '@heroicons/react/24/outline';
 
 interface SummaryRecord {
