@@ -1,6 +1,5 @@
 'use client';
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   PlayCircleIcon,
   DocumentTextIcon,
@@ -8,8 +7,11 @@ import {
   ArrowDownTrayIcon,
   SparklesIcon,
   CommandLineIcon,
-  PhotoIcon,
   PencilSquareIcon,
+  PlusIcon,
+  TrashIcon,
+  CheckIcon,
+  PhotoIcon,
 } from '@heroicons/react/24/outline';
 import Link from 'next/link';
 
@@ -34,15 +36,26 @@ interface Result {
   full_text?: string;
 }
 
+interface BatchResult {
+  url: string;
+  status: 'success' | 'error';
+  data?: Result;
+  error?: string;
+}
+
 export default function Home() {
-  const router = useRouter();
   const [url, setUrl] = useState('');
+  const [batchUrls, setBatchUrls] = useState('');
+  const [batchMode, setBatchMode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [summarizing, setSummarizing] = useState(false);
   const [error, setError] = useState('');
   const [source, setSource] = useState('');
+  const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
+  const [copied, setCopied] = useState(false);
+  const [activeTab, setActiveTab] = useState<'single' | 'batch'>('single');
 
   const handleExtract = async () => {
     if (!url) return;
@@ -66,6 +79,40 @@ export default function Home() {
       setResult(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBatchExtract = async () => {
+    const urls = batchUrls.split('\n').filter(u => u.trim());
+    if (urls.length === 0) return;
+
+    setLoading(true);
+    setError('');
+    setBatchResults(urls.map(u => ({ url: u, status: 'pending' as const })));
+
+    try {
+      const results: BatchResult[] = [];
+      for (const u of urls) {
+        try {
+          const res = await fetch('/api/transcript', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: u.trim() }),
+          });
+          
+          if (res.ok) {
+            const data = await res.json();
+            results.push({ url: u, status: 'success', data });
+          } else {
+            results.push({ url: u, status: 'error', error: 'Failed to extract' });
+          }
+        } catch {
+          results.push({ url: u, status: 'error', error: 'Request failed' });
+        }
+      }
+      setBatchResults(results);
     } finally {
       setLoading(false);
     }
@@ -108,6 +155,12 @@ export default function Home() {
     }
   };
 
+  const copyToClipboard = async (text: string) => {
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
@@ -126,39 +179,128 @@ export default function Home() {
           <p className="text-xl text-purple-200">Transform YouTube videos into concise summaries</p>
         </div>
 
+        {/* Mode Toggle */}
+        <div className="flex justify-center gap-4 mb-8">
+          <button
+            onClick={() => setBatchMode(false)}
+            className={`px-6 py-3 rounded-lg font-medium transition-all ${
+              !batchMode ? 'bg-purple-600 text-white' : 'bg-slate-800/50 text-gray-400 hover:text-white'
+            }`}
+          >
+            <DocumentTextIcon className="w-5 h-5 inline mr-2" />
+            Single Video
+          </button>
+          <button
+            onClick={() => setBatchMode(true)}
+            className={`px-6 py-3 rounded-lg font-medium transition-all ${
+              batchMode ? 'bg-purple-600 text-white' : 'bg-slate-800/50 text-gray-400 hover:text-white'
+            }`}
+          >
+            <PlusIcon className="w-5 h-5 inline mr-2" />
+            Batch Processing
+          </button>
+        </div>
+
         {/* Input Section */}
         <div className="bg-slate-800/50 backdrop-blur rounded-2xl p-8 mb-8 border border-purple-500/20">
-          <div className="flex gap-4">
-            <input
-              type="text"
-              placeholder="Paste YouTube URL here..."
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleExtract()}
-              className="flex-1 px-6 py-4 bg-slate-900/50 border border-purple-500/30 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 text-lg"
-            />
-            <button
-              onClick={handleExtract}
-              disabled={loading || !url}
-              className="px-8 py-4 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-xl transition-all font-semibold text-lg flex items-center gap-2"
-            >
-              <DocumentTextIcon className="w-6 h-6" />
-              {loading ? 'Extracting...' : 'Extract'}
-            </button>
-          </div>
+          {!batchMode ? (
+            <div className="flex gap-4">
+              <input
+                type="text"
+                placeholder="Paste YouTube URL here..."
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleExtract()}
+                className="flex-1 px-6 py-4 bg-slate-900/50 border border-purple-500/30 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 text-lg"
+              />
+              <button
+                onClick={handleExtract}
+                disabled={loading || !url}
+                className="px-8 py-4 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-xl transition-all font-semibold text-lg flex items-center gap-2"
+              >
+                <DocumentTextIcon className="w-6 h-6" />
+                {loading ? 'Extracting...' : 'Extract'}
+              </button>
+            </div>
+          ) : (
+            <div>
+              <textarea
+                placeholder="Paste YouTube URLs (one per line)..."
+                value={batchUrls}
+                onChange={(e) => setBatchUrls(e.target.value)}
+                rows={6}
+                className="w-full px-6 py-4 bg-slate-900/50 border border-purple-500/30 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 resize-none"
+              />
+              <button
+                onClick={handleBatchExtract}
+                disabled={loading || !batchUrls.trim()}
+                className="mt-4 w-full px-8 py-4 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-xl transition-all font-semibold text-lg flex items-center justify-center gap-2"
+              >
+                <PlusIcon className="w-6 h-6" />
+                {loading ? 'Processing...' : `Process ${batchUrls.split('\n').filter(u => u.trim()).length} Videos`}
+              </button>
+            </div>
+          )}
           {error && <p className="mt-4 text-red-400">{error}</p>}
         </div>
 
-        {/* Results Section */}
-        {result && (
+        {/* Batch Results */}
+        {batchMode && batchResults.length > 0 && (
+          <div className="bg-slate-800/50 backdrop-blur rounded-2xl p-6 mb-8 border border-purple-500/20">
+            <h3 className="text-xl font-semibold text-white mb-4">Batch Results</h3>
+            <div className="space-y-3">
+              {batchResults.map((r, idx) => (
+                <div key={idx} className={`p-4 rounded-lg flex items-center gap-4 ${
+                  r.status === 'success' ? 'bg-green-900/20 border border-green-500/30' :
+                  r.status === 'pending' ? 'bg-yellow-900/20 border border-yellow-500/30' :
+                  'bg-red-900/20 border border-red-500/30'
+                }`}>
+                  {r.status === 'success' ? (
+                    <CheckIcon className="w-6 h-6 text-green-400 flex-shrink-0" />
+                  ) : r.status === 'pending' ? (
+                    <div className="w-6 h-6 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin flex-shrink-0"></div>
+                  ) : (
+                    <TrashIcon className="w-6 h-6 text-red-400 flex-shrink-0" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white font-medium truncate">{r.url}</p>
+                    {r.data && <p className="text-gray-400 text-sm">{r.data.title}</p>}
+                    {r.error && <p className="text-red-400 text-sm">{r.error}</p>}
+                  </div>
+                  {r.data && (
+                    <button
+                      onClick={() => {
+                        setResult(r.data);
+                        setBatchMode(false);
+                      }}
+                      className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm flex-shrink-0"
+                    >
+                      View
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Single Video Results */}
+        {result && !batchMode && (
           <div className="space-y-6">
             {/* Video Info */}
             <div className="bg-slate-800/50 backdrop-blur rounded-2xl p-6 border border-purple-500/20">
-              <h2 className="text-2xl font-bold text-white mb-2">{result.title}</h2>
-              <div className="flex gap-6 text-gray-400">
-                <span>{result.author}</span>
-                <span>•</span>
-                <span>{result.length}</span>
+              <div className="flex justify-between items-start">
+                <div>
+                  <h2 className="text-2xl font-bold text-white mb-2">{result.title}</h2>
+                  <div className="flex gap-6 text-gray-400">
+                    <span>{result.author}</span>
+                    <span>•</span>
+                    <span>{result.length}</span>
+                  </div>
+                </div>
+                <Link href="/history" className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm transition-all">
+                  History
+                </Link>
               </div>
             </div>
 
@@ -169,18 +311,27 @@ export default function Home() {
                   <ClipboardDocumentIcon className="w-6 h-6 text-purple-400" />
                   Transcript
                 </h3>
-                <button
-                  onClick={handleSummarize}
-                  disabled={summarizing}
-                  className="px-6 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white rounded-lg transition-all flex items-center gap-2"
-                >
-                  <SparklesIcon className="w-5 h-5" />
-                  {summarizing ? 'Summarizing...' : 'Generate Summary'}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => copyToClipboard(result.transcript.map(l => l.text).join('\n'))}
+                    className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm transition-all flex items-center gap-2"
+                  >
+                    {copied ? <CheckIcon className="w-4 h-4" /> : <ClipboardDocumentIcon className="w-4 h-4" />}
+                    {copied ? 'Copied!' : 'Copy'}
+                  </button>
+                  <button
+                    onClick={handleSummarize}
+                    disabled={summarizing}
+                    className="px-6 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white rounded-lg transition-all flex items-center gap-2"
+                  >
+                    <SparklesIcon className="w-5 h-5" />
+                    {summarizing ? 'Summarizing...' : 'Generate Summary'}
+                  </button>
+                </div>
               </div>
               <div className="max-h-96 overflow-y-auto space-y-2">
                 {result.transcript.map((line, idx) => (
-                  <div key={idx} className="flex gap-4 p-3 bg-slate-900/30 rounded-lg">
+                  <div key={idx} className="flex gap-4 p-3 bg-slate-900/30 rounded-lg hover:bg-slate-900/50 transition-colors">
                     <span className="text-purple-400 font-mono text-sm min-w-[60px]">
                       {formatTime(line.start)}
                     </span>
@@ -271,7 +422,7 @@ export default function Home() {
         )}
 
         {/* Features */}
-        {!result && (
+        {!result && batchResults.length === 0 && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-12">
             <div className="bg-slate-800/30 rounded-xl p-6 text-center">
               <DocumentTextIcon className="w-12 h-12 text-purple-400 mx-auto mb-4" />
@@ -288,15 +439,6 @@ export default function Home() {
               <h3 className="text-lg font-semibold text-white mb-2">Export & Share</h3>
               <p className="text-gray-400">Download summaries in Markdown, JSON, or plain text</p>
             </div>
-          </div>
-        )}
-
-        {/* History Link */}
-        {result && (
-          <div className="mt-8 text-center">
-            <Link href="/history" className="text-purple-400 hover:text-purple-300 underline">
-              View History
-            </Link>
           </div>
         )}
       </div>
