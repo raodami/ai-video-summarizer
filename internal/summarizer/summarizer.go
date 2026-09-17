@@ -8,8 +8,31 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
 )
+
+type SupportedLanguage struct {
+	Code    string `json:"code"`
+	Name    string `json:"name"`
+}
+
+var Languages = []SupportedLanguage{
+	{Code: "en", Name: "English"},
+	{Code: "zh", Name: "Chinese"},
+	{Code: "ja", Name: "Japanese"},
+	{Code: "ko", Name: "Korean"},
+	{Code: "es", Name: "Spanish"},
+	{Code: "fr", Name: "French"},
+	{Code: "de", Name: "German"},
+	{Code: "pt", Name: "Portuguese"},
+	{Code: "ru", Name: "Russian"},
+	{Code: "ar", Name: "Arabic"},
+	{Code: "hi", Name: "Hindi"},
+	{Code: "th", Name: "Thai"},
+	{Code: "vi", Name: "Vietnamese"},
+	{Code: "id", Name: "Indonesian"},
+	{Code: "ms", Name: "Malay"},
+	{Code: "tl", Name: "Filipino"},
+}
 
 type SummarizerClient struct {
 	APIKey string
@@ -42,6 +65,7 @@ type SummaryResult struct {
 	Timestamps  []TimestampPoint `json:"timestamps"`
 	Duration    string    `json:"duration"`
 	Tags        []string  `json:"tags"`
+	Source      string    `json:"source"`
 }
 
 type TimestampPoint struct {
@@ -49,15 +73,11 @@ type TimestampPoint struct {
 	Text string `json:"text"`
 }
 
-func NewSummarizerClient() *SummarizerClient {
+func NewClient() *SummarizerClient {
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
-	baseURL := os.Getenv("DEEPSEEK_BASE_URL")
-	if baseURL == "" {
-		baseURL = "https://api.deepseek.com/v1"
-	}
 	return &SummarizerClient{
 		APIKey: apiKey,
-		BaseURL: baseURL,
+		BaseURL: "https://api.deepseek.com/v1",
 	}
 }
 
@@ -70,124 +90,116 @@ func (c *SummarizerClient) GetModel() string {
 
 func (c *SummarizerClient) Summarize(text string, options map[string]interface{}) (*SummaryResult, error) {
 	if c.APIKey == "" {
-		return c.generateMockSummary(text), nil
+		return generateMockSummary(text), nil
 	}
 
-	messages := []Message{
-		{
-			Role: "system",
-			Content: "You are a professional video summarizer. Extract key points, generate concise summaries, and identify timestamps for important moments.",
-		},
-		{
-			Role: "user",
-			Content: fmt.Sprintf("Summarize this video transcript:\n\n%s\n\nPlease provide:\n1. A concise summary (2-3 sentences)\n2. Key points (bullet points)\n3. Important timestamps with descriptions\n4. Relevant tags\n\nReturn as JSON with fields: summary, key_points (array), timestamps (array with 'time' and 'text'), tags (array)", text),
-		},
-	}
+	prompt := buildPrompt(text, options)
 
-	reqBody := SummaryRequest{
+	reqBody, _ := json.Marshal(SummaryRequest{
 		Model: "deepseek-chat",
-		Messages: messages,
-		Temperature: 0.7,
-		MaxTokens: 2000,
-	}
+		Messages: []Message{
+			{"system", "You are a helpful assistant that summarizes video transcripts."},
+			{"user", prompt},
+		},
+		Temperature: 0.3,
+		MaxTokens: 2048,
+	})
 
-	jsonData, err := json.Marshal(reqBody)
+	resp, err := http.Post(
+		fmt.Sprintf("%s/chat/completions", c.BaseURL),
+		"application/json",
+		bytes.NewBuffer(reqBody),
+	)
 	if err != nil {
-		return nil, err
-	}
-
-	url := fmt.Sprintf("%s/chat/completions", c.BaseURL)
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.APIKey)
-
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
+		return generateMockSummary(text), nil
 	}
 	defer resp.Body.Close()
 
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
+	body, _ := ioutil.ReadAll(resp.Body)
 
-	// 解析JSON响应
 	var result SummaryResponse
-	if err := json.Unmarshal(body, &result); err != nil {
-		return c.generateMockSummary(text), nil
+	json.Unmarshal(body, &result)
+
+	if len(result.Choices) > 0 {
+		return parseSummaryResponse(result.Choices[0].Message.Content), nil
 	}
 
-	if len(result.Choices) == 0 {
-		return c.generateMockSummary(text), nil
-	}
-
-	content := result.Choices[0].Message.Content
-	
-	// 从Markdown中提取JSON
-	jsonStr := extractJSON(content)
-	if jsonStr == "" {
-		jsonStr = content
-	}
-
-	var summary SummaryResult
-	if err := json.Unmarshal([]byte(jsonStr), &summary); err != nil {
-		// 如果解析失败，使用简化版本
-		summary = SummaryResult{
-			Summary: content,
-			KeyPoints: []string{},
-			Timestamps: []TimestampPoint{},
-			Tags: []string{"AI", "Technology"},
-		}
-	}
-
-	return &summary, nil
+	return generateMockSummary(text), nil
 }
 
-func (c *SummarizerClient) generateMockSummary(text string) *SummaryResult {
-	lines := strings.Split(text, "\n")
-	keyPoints := make([]string, 0)
-	timestamps := make([]TimestampPoint, 0)
+func buildPrompt(text string, options map[string]interface{}) string {
+	language := "en"
+	if lang, ok := options["language"].(string); ok && lang != "" {
+		language = lang
+	}
 
-	for i, line := range lines {
-		if len(line) > 20 {
-			keyPoints = append(keyPoints, line[:min(100, len(line))])
+	instructions := map[string]string{
+		"en": "Please summarize this video transcript. Include: 1) A brief summary 2) Key points 3) Important timestamps 4) Relevant tags",
+		"zh": "请总结这段视频字幕。包括：1) 简要概述 2) 关键点 3) 重要时间戳 4) 相关标签",
+		"ja": "この動画の要約を作成してください。以下の要素を含めてください：1) まとめ 2) 重要なポイント 3) 重要なタイムスタンプ 4) 関連タグ",
+		"ko": "이 영상 요약을 만들어 주세요. 다음 요소를 포함하세요: 1) 요약 2) 주요 포인트 3) 중요한 타임스탬프 4) 관련 태그",
+		"es": "Resume este transcripción de video. Incluye: 1) Un breve resumen 2) Puntos clave 3) Marcas de tiempo importantes 4) Etiquetas relevantes",
+		"fr": "Résumez cette transcription vidéo. Incluez: 1) Un bref résumé 2) Points clés 3) Horodatages importants 4) Tags pertinents",
+		"de": "Fassen Sie dieses Video-Zusammenfassung zusammen. Beinhaltet: 1) Kurze Zusammenfassung 2) Schlüsselinformationen 3) Wichtige Zeitstempel 4) Relevante Tags",
+		"pt": "Resuma esta transcrição de vídeo. Inclua: 1) Breve resumo 2) Pontos principais 3) Marcações de tempo importantes 4) Tags relevantes",
+		"ru": "Подведите итог этой расшифровки видео. Включите: 1) Краткое изложение 2) Ключевые моменты 3) Важные временные метки 4) Соответствующие теги",
+		"ar": "لخص هذا النص من الفيديو. يتضمن: 1) ملخص موجز 2) النقاط الرئيسية 3) الطوابع الزمنية المهمة 4) الوسوم ذات الصلة",
+		"hi": "इस वीडियो ट्रांसक्रिप्ट का सारांश दें। शामिल करें: 1) संक्षिप्त सारांश 2) मुख्य बिंदु 3) महत्वपूर्ण समय स्तंभ 4) प्रासंगिक टैग",
+	}
+
+	inst, ok := instructions[language]
+	if !ok {
+		inst = instructions["en"]
+	}
+
+	return fmt.Sprintf("%s\n\n%s", inst, text)
+}
+
+func parseSummaryResponse(content string) *SummaryResult {
+	result := &SummaryResult{
+		Summary: content,
+		Source:  "deepseek",
+	}
+
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "-") || strings.HasPrefix(line, "*") {
+			result.KeyPoints = append(result.KeyPoints, strings.TrimPrefix(strings.TrimPrefix(line, "-"), "*"))
+		} else if strings.Contains(line, ":") && len(line) < 50 {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				result.Timestamps = append(result.Timestamps, TimestampPoint{
+					Time: strings.TrimSpace(parts[0]),
+					Text: strings.TrimSpace(parts[1]),
+				})
+			}
 		}
-		if i%3 == 0 {
-			minutes := i / 3
-			timestamps = append(timestamps, TimestampPoint{
-				Time: fmt.Sprintf("%d:%02d", minutes/60, minutes%60),
-				Text: line[:min(50, len(line))],
-			})
+		if strings.HasPrefix(line, "#") {
+			result.Tags = append(result.Tags, strings.TrimPrefix(line, "#"))
 		}
 	}
 
+	return result
+}
+
+func generateMockSummary(text string) *SummaryResult {
 	return &SummaryResult{
-		Summary: "This video covers important topics and insights.",
-		KeyPoints: keyPoints[:min(5, len(keyPoints))],
-		Timestamps: timestamps[:min(3, len(timestamps))],
-		Duration: "10:00",
-		Tags: []string{"AI", "Technology", "Tutorial"},
+		Summary: "This video covers important topics about the subject matter. The speaker provides detailed insights and practical examples.",
+		KeyPoints: []string{
+			"Introduction to the main topic",
+			"Key concepts and explanations",
+			"Practical examples and case studies",
+			"Summary and conclusions",
+		},
+		Timestamps: []TimestampPoint{
+			{Time: "00:00", Text: "Introduction"},
+			{Time: "02:30", Text: "Main topic overview"},
+			{Time: "05:45", Text: "Detailed explanation"},
+			{Time: "08:20", Text: "Examples and demonstration"},
+			{Time: "10:00", Text: "Conclusion"},
+		},
+		Tags: []string{"education", "tutorial", "technology"},
+		Source: "mock",
 	}
-}
-
-func extractJSON(s string) string {
-	start := strings.Index(s, "{")
-	end := strings.LastIndex(s, "}")
-	if start != -1 && end != -1 && end > start {
-		return s[start:end+1]
-	}
-	return ""
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import Link from 'next/link';
 import {
   PlayCircleIcon,
   DocumentTextIcon,
@@ -11,9 +12,21 @@ import {
   PlusIcon,
   TrashIcon,
   CheckIcon,
-  PhotoIcon,
+  LanguagesIcon,
+  FilmIcon,
 } from '@heroicons/react/24/outline';
-import Link from 'next/link';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+} from 'recharts';
 
 interface TranscriptLine {
   start: number;
@@ -34,6 +47,7 @@ interface Result {
   length: string;
   transcript: TranscriptLine[];
   full_text?: string;
+  thumbnail?: string;
 }
 
 interface BatchResult {
@@ -41,6 +55,11 @@ interface BatchResult {
   status: 'success' | 'error' | 'pending';
   data?: Result;
   error?: string;
+}
+
+interface Language {
+  code: string;
+  name: string;
 }
 
 export default function Home() {
@@ -55,7 +74,15 @@ export default function Home() {
   const [source, setSource] = useState('');
   const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
   const [copied, setCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState<'single' | 'batch'>('single');
+  const [selectedLanguage, setSelectedLanguage] = useState('en');
+  const [languages, setLanguages] = useState<Language[]>([]);
+
+  useState(() => {
+    fetch('/api/languages')
+      .then(res => res.json())
+      .then(data => setLanguages(data))
+      .catch(() => {});
+  });
 
   const handleExtract = async () => {
     if (!url) return;
@@ -129,7 +156,8 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           transcript_id: result.id,
-          full_text: result.full_text || result.transcript.map(l => l.text).join(' ')
+          full_text: result.full_text || result.transcript.map(l => l.text).join(' '),
+          language: selectedLanguage,
         }),
       });
       
@@ -139,7 +167,7 @@ export default function Home() {
       
       const data = await res.json();
       setSummary(data.summary);
-      setSource(data.source);
+      setSource(data.source || data.model || 'AI');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -148,11 +176,8 @@ export default function Home() {
   };
 
   const handleExport = async (format: string) => {
-    if (!result || !summary) return;
-    const windowRef = window.open(`/api/export/${result.id}/${format}`);
-    if (windowRef) {
-      windowRef.focus();
-    }
+    if (!result) return;
+    window.open(`/api/export/${result.id}/${format}`, '_blank');
   };
 
   const copyToClipboard = async (text: string) => {
@@ -165,6 +190,14 @@ export default function Home() {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const getYouTubeThumbnail = (url: string) => {
+    const match = url.match(/(?:v=|\/)([a-zA-Z0-9_-]{11})/);
+    if (match) {
+      return `https://img.youtube.com/vi/${match[1]}/maxresdefault.jpg`;
+    }
+    return null;
   };
 
   return (
@@ -204,23 +237,40 @@ export default function Home() {
         {/* Input Section */}
         <div className="bg-slate-800/50 backdrop-blur rounded-2xl p-8 mb-8 border border-purple-500/20">
           {!batchMode ? (
-            <div className="flex gap-4">
-              <input
-                type="text"
-                placeholder="Paste YouTube URL here..."
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleExtract()}
-                className="flex-1 px-6 py-4 bg-slate-900/50 border border-purple-500/30 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 text-lg"
-              />
-              <button
-                onClick={handleExtract}
-                disabled={loading || !url}
-                className="px-8 py-4 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-xl transition-all font-semibold text-lg flex items-center gap-2"
-              >
-                <DocumentTextIcon className="w-6 h-6" />
-                {loading ? 'Extracting...' : 'Extract'}
-              </button>
+            <div className="space-y-4">
+              <div className="flex gap-4">
+                <input
+                  type="text"
+                  placeholder="Paste YouTube URL here..."
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleExtract()}
+                  className="flex-1 px-6 py-4 bg-slate-900/50 border border-purple-500/30 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 text-lg"
+                />
+                <button
+                  onClick={handleExtract}
+                  disabled={loading || !url}
+                  className="px-8 py-4 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-xl transition-all font-semibold text-lg flex items-center gap-2"
+                >
+                  <DocumentTextIcon className="w-6 h-6" />
+                  {loading ? 'Extracting...' : 'Extract'}
+                </button>
+              </div>
+              
+              {/* Language Selector */}
+              <div className="flex items-center gap-4">
+                <LanguagesIcon className="w-5 h-5 text-purple-400" />
+                <select
+                  value={selectedLanguage}
+                  onChange={(e) => setSelectedLanguage(e.target.value)}
+                  className="px-4 py-2 bg-slate-900/50 border border-purple-500/30 rounded-lg text-white focus:outline-none focus:border-purple-500"
+                >
+                  {languages.map(lang => (
+                    <option key={lang.code} value={lang.code}>{lang.name}</option>
+                  ))}
+                </select>
+                <span className="text-gray-400 text-sm">Summary language</span>
+              </div>
             </div>
           ) : (
             <div>
@@ -289,20 +339,41 @@ export default function Home() {
         {/* Single Video Results */}
         {result && !batchMode && (
           <div className="space-y-6">
-            {/* Video Info */}
+            {/* Video Info with Thumbnail */}
             <div className="bg-slate-800/50 backdrop-blur rounded-2xl p-6 border border-purple-500/20">
-              <div className="flex justify-between items-start">
-                <div>
+              <div className="flex gap-6">
+                {/* Thumbnail */}
+                <div className="flex-shrink-0">
+                  {getYouTubeThumbnail(result.transcript?.[0]?.text || '') ? (
+                    <img 
+                      src={`https://img.youtube.com/vi/${result.id.slice(0,11)}/maxresdefault.jpg`}
+                      alt={result.title}
+                      className="w-48 h-27 rounded-lg object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = 'https://via.placeholder.com/480x270/1e293b/64748b?text=Video';
+                      }}
+                    />
+                  ) : (
+                    <div className="w-48 h-27 bg-slate-700 rounded-lg flex items-center justify-center">
+                      <FilmIcon className="w-12 h-12 text-gray-500" />
+                    </div>
+                  )}
+                </div>
+                
+                {/* Video Info */}
+                <div className="flex-1">
                   <h2 className="text-2xl font-bold text-white mb-2">{result.title}</h2>
-                  <div className="flex gap-6 text-gray-400">
+                  <div className="flex gap-6 text-gray-400 mb-4">
                     <span>{result.author}</span>
                     <span>•</span>
                     <span>{result.length}</span>
                   </div>
+                  <div className="flex gap-2">
+                    <Link href="/history" className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm transition-all">
+                      History
+                    </Link>
+                  </div>
                 </div>
-                <Link href="/history" className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm transition-all">
-                  History
-                </Link>
               </div>
             </div>
 
@@ -314,6 +385,20 @@ export default function Home() {
                   Transcript
                 </h3>
                 <div className="flex gap-2">
+                  <button
+                    onClick={() => handleExport('srt')}
+                    className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-sm transition-all flex items-center gap-2"
+                  >
+                    <FilmIcon className="w-4 h-4" />
+                    SRT
+                  </button>
+                  <button
+                    onClick={() => handleExport('vtt')}
+                    className="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg text-sm transition-all flex items-center gap-2"
+                  >
+                    <FilmIcon className="w-4 h-4" />
+                    VTT
+                  </button>
                   <button
                     onClick={() => copyToClipboard(result.transcript.map(l => l.text).join('\n'))}
                     className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm transition-all flex items-center gap-2"
@@ -425,7 +510,7 @@ export default function Home() {
 
         {/* Features */}
         {!result && batchResults.length === 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-12">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mt-12">
             <div className="bg-slate-800/30 rounded-xl p-6 text-center">
               <DocumentTextIcon className="w-12 h-12 text-purple-400 mx-auto mb-4" />
               <h3 className="text-lg font-semibold text-white mb-2">Auto Transcription</h3>
@@ -434,12 +519,17 @@ export default function Home() {
             <div className="bg-slate-800/30 rounded-xl p-6 text-center">
               <SparklesIcon className="w-12 h-12 text-yellow-400 mx-auto mb-4" />
               <h3 className="text-lg font-semibold text-white mb-2">AI Summarization</h3>
-              <p className="text-gray-400">Generate concise summaries with key points and timestamps</p>
+              <p className="text-gray-400">Generate summaries with key points and timestamps</p>
             </div>
             <div className="bg-slate-800/30 rounded-xl p-6 text-center">
-              <ArrowDownTrayIcon className="w-12 h-12 text-green-400 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-white mb-2">Export & Share</h3>
-              <p className="text-gray-400">Download summaries in Markdown, JSON, or plain text</p>
+              <FilmIcon className="w-12 h-12 text-orange-400 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold text-white mb-2">Subtitle Export</h3>
+              <p className="text-gray-400">Download transcripts as SRT or VTT subtitle files</p>
+            </div>
+            <div className="bg-slate-800/30 rounded-xl p-6 text-center">
+              <LanguagesIcon className="w-12 h-12 text-green-400 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold text-white mb-2">Multi-Language</h3>
+              <p className="text-gray-400">Support for 16+ languages in summaries</p>
             </div>
           </div>
         )}

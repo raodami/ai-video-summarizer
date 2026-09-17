@@ -154,13 +154,13 @@ func SetupRoutes(r *gin.Engine, s *store.Store, ds *summarizer.SummarizerClient)
 			return
 		}
 		data, _ := parseSummaryRecord(smry)
-		json, err := export.ExportToJSON(data)
+		jsonStr, err := export.ExportToJSON(data)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		c.Header("Content-Type", "application/json")
-		c.String(http.StatusOK, json)
+		c.String(http.StatusOK, jsonStr)
 	})
 
 	r.GET("/api/export/:id/text", func(c *gin.Context) {
@@ -173,6 +173,38 @@ func SetupRoutes(r *gin.Engine, s *store.Store, ds *summarizer.SummarizerClient)
 		data, _ := parseSummaryRecord(smry)
 		text := export.ExportToText(data)
 		c.String(http.StatusOK, text)
+	})
+
+	// Transcript export endpoints
+	r.GET("/api/export/:id/srt", func(c *gin.Context) {
+		id := c.Param("id")
+		video, err := s.GetVideo(id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
+		srt := export.ExportToSRT(video.Lines)
+		c.Header("Content-Type", "text/plain")
+		c.Header("Content-Disposition", `attachment; filename="transcript.srt"`)
+		c.String(http.StatusOK, srt)
+	})
+
+	r.GET("/api/export/:id/vtt", func(c *gin.Context) {
+		id := c.Param("id")
+		video, err := s.GetVideo(id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
+		vtt := export.ExportToVTT(video.Lines)
+		c.Header("Content-Type", "text/vtt")
+		c.Header("Content-Disposition", `attachment; filename="transcript.vtt"`)
+		c.String(http.StatusOK, vtt)
+	})
+
+	// Languages endpoint
+	r.GET("/api/languages", func(c *gin.Context) {
+		c.JSON(http.StatusOK, summarizer.Languages)
 	})
 }
 
