@@ -1,9 +1,9 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -12,6 +12,7 @@ import (
 	"ai-video-summarizer/internal/summarizer"
 	"ai-video-summarizer/internal/transcript"
 	"ai-video-summarizer/internal/store"
+	"ai-video-summarizer/internal/ws"
 )
 
 func SetupRoutes(r *gin.Engine, s *store.Store, ds *summarizer.SummarizerClient) {
@@ -44,6 +45,9 @@ func SetupRoutes(r *gin.Engine, s *store.Store, ds *summarizer.SummarizerClient)
 			CreatedAt: time.Now(),
 		})
 
+		// Send WebSocket update
+		ws.Manager.SendProgress(videoID, 50, "success", "Transcript extracted")
+
 		c.JSON(http.StatusOK, gin.H{
 			"id":         videoID,
 			"title":      tdata.Title,
@@ -72,11 +76,15 @@ func SetupRoutes(r *gin.Engine, s *store.Store, ds *summarizer.SummarizerClient)
 		}
 
 		// Generate summary using DeepSeek or mock
+		ws.Manager.SendProgress(req.TranscriptID, 70, "processing", "Generating AI summary...")
 		summary, err := ds.Summarize(text, nil)
 		if err != nil {
+			ws.Manager.SendError(req.TranscriptID, err.Error())
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		ws.Manager.SendProgress(req.TranscriptID, 90, "processing", "Saving results...")
+
 
 		// Save summary
 		summaryID := uuid.New().String()
@@ -95,6 +103,7 @@ func SetupRoutes(r *gin.Engine, s *store.Store, ds *summarizer.SummarizerClient)
 			Source:     source,
 			CreatedAt:  time.Now(),
 		})
+		ws.Manager.SendProgress(req.TranscriptID, 100, "complete", "Summary generated")
 
 		c.JSON(http.StatusOK, gin.H{
 			"id":       summaryID,
@@ -200,6 +209,11 @@ func SetupRoutes(r *gin.Engine, s *store.Store, ds *summarizer.SummarizerClient)
 		c.Header("Content-Type", "text/vtt")
 		c.Header("Content-Disposition", `attachment; filename="transcript.vtt"`)
 		c.String(http.StatusOK, vtt)
+	})
+
+	// WebSocket for real-time progress
+	r.GET("/ws/progress", func(c *gin.Context) {
+		ws.ManagerInstance.Handler().ServeHTTP(c.Writer, c.Request)
 	})
 
 	// Languages endpoint

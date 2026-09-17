@@ -12,7 +12,7 @@ import {
   PlusIcon,
   TrashIcon,
   CheckIcon,
-  LanguagesIcon,
+  LanguageIcon,
   FilmIcon,
 } from '@heroicons/react/24/outline';
 import {
@@ -259,7 +259,7 @@ export default function Home() {
               
               {/* Language Selector */}
               <div className="flex items-center gap-4">
-                <LanguagesIcon className="w-5 h-5 text-purple-400" />
+                <LanguageIcon className="w-5 h-5 text-purple-400" />
                 <select
                   value={selectedLanguage}
                   onChange={(e) => setSelectedLanguage(e.target.value)}
@@ -527,7 +527,7 @@ export default function Home() {
               <p className="text-gray-400">Download transcripts as SRT or VTT subtitle files</p>
             </div>
             <div className="bg-slate-800/30 rounded-xl p-6 text-center">
-              <LanguagesIcon className="w-12 h-12 text-green-400 mx-auto mb-4" />
+              <LanguageIcon className="w-12 h-12 text-green-400 mx-auto mb-4" />
               <h3 className="text-lg font-semibold text-white mb-2">Multi-Language</h3>
               <p className="text-gray-400">Support for 16+ languages in summaries</p>
             </div>

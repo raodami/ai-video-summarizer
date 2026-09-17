@@ -14,6 +14,7 @@ type VideoInfo struct {
 	Title       string    `json:"title"`
 	Author      string    `json:"author"`
 	Length      string    `json:"length"`
+	Thumbnail   string    `json:"thumbnail,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
