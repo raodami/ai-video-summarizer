@@ -38,7 +38,7 @@ interface Result {
 
 interface BatchResult {
   url: string;
-  status: 'success' | 'error';
+  status: 'success' | 'error' | 'pending';
   data?: Result;
   error?: string;
 }
