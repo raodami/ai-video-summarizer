@@ -75,10 +75,18 @@ type TimestampPoint struct {
 
 func NewClient() *SummarizerClient {
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
-	return &SummarizerClient{
-		APIKey: apiKey,
-		BaseURL: "https://api.deepseek.com/v1",
+	baseURL := os.Getenv("DEEPSEEK_BASE_URL")
+	if baseURL == "" {
+		baseURL = "https://api.deepseek.com/v1"
 	}
+	return &SummarizerClient{
+		APIKey:  apiKey,
+		BaseURL: baseURL,
+	}
+}
+
+func NewSummarizerClient() *SummarizerClient {
+	return NewClient()
 }
 
 func (c *SummarizerClient) GetModel() string {
