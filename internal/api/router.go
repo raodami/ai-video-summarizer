@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -46,7 +47,7 @@ func SetupRoutes(r *gin.Engine, s *store.Store, ds *summarizer.SummarizerClient)
 		})
 
 		// Send WebSocket update
-		ws.Manager.SendProgress(videoID, 50, "success", "Transcript extracted")
+		ws.ManagerInstance.SendProgress(videoID, 50, "success", "Transcript extracted")
 
 		c.JSON(http.StatusOK, gin.H{
 			"id":         videoID,
@@ -76,14 +77,14 @@ func SetupRoutes(r *gin.Engine, s *store.Store, ds *summarizer.SummarizerClient)
 		}
 
 		// Generate summary using DeepSeek or mock
-		ws.Manager.SendProgress(req.TranscriptID, 70, "processing", "Generating AI summary...")
+		ws.ManagerInstance.SendProgress(req.TranscriptID, 70, "processing", "Generating AI summary...")
 		summary, err := ds.Summarize(text, nil)
 		if err != nil {
-			ws.Manager.SendError(req.TranscriptID, err.Error())
+			ws.ManagerInstance.SendError(req.TranscriptID, err.Error())
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		ws.Manager.SendProgress(req.TranscriptID, 90, "processing", "Saving results...")
+		ws.ManagerInstance.SendProgress(req.TranscriptID, 90, "processing", "Saving results...")
 
 
 		// Save summary
@@ -103,7 +104,7 @@ func SetupRoutes(r *gin.Engine, s *store.Store, ds *summarizer.SummarizerClient)
 			Source:     source,
 			CreatedAt:  time.Now(),
 		})
-		ws.Manager.SendProgress(req.TranscriptID, 100, "complete", "Summary generated")
+		ws.ManagerInstance.SendProgress(req.TranscriptID, 100, "complete", "Summary generated")
 
 		c.JSON(http.StatusOK, gin.H{
 			"id":       summaryID,
@@ -192,7 +193,17 @@ func SetupRoutes(r *gin.Engine, s *store.Store, ds *summarizer.SummarizerClient)
 			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 			return
 		}
-		srt := export.ExportToSRT(video.Lines)
+		type ExportLine struct {
+		Start float64 `json:"start"`
+		Text  string  `json:"text"`
+	}
+
+	// Convert store lines to export lines
+	lines := make([]export.TranscriptLine, len(video.Lines))
+	for i, l := range video.Lines {
+		lines[i] = export.TranscriptLine{Start: l.Start, Text: l.Text}
+	}
+	srt := export.ExportToSRT(lines)
 		c.Header("Content-Type", "text/plain")
 		c.Header("Content-Disposition", `attachment; filename="transcript.srt"`)
 		c.String(http.StatusOK, srt)
@@ -205,7 +216,17 @@ func SetupRoutes(r *gin.Engine, s *store.Store, ds *summarizer.SummarizerClient)
 			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 			return
 		}
-		vtt := export.ExportToVTT(video.Lines)
+		type ExportLine struct {
+		Start float64 `json:"start"`
+		Text  string  `json:"text"`
+	}
+
+	// Convert store lines to export lines
+	lines := make([]export.TranscriptLine, len(video.Lines))
+	for i, l := range video.Lines {
+		lines[i] = export.TranscriptLine{Start: l.Start, Text: l.Text}
+	}
+	vtt := export.ExportToVTT(lines)
 		c.Header("Content-Type", "text/vtt")
 		c.Header("Content-Disposition", `attachment; filename="transcript.vtt"`)
 		c.String(http.StatusOK, vtt)

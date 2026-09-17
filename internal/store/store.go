@@ -8,25 +8,31 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+type VideoLine struct {
+	Start float64 `json:"start"`
+	Text  string  `json:"text"`
+}
+
 type VideoInfo struct {
-	ID          string    `json:"id"`
-	URL         string    `json:"url"`
-	Title       string    `json:"title"`
-	Author      string    `json:"author"`
-	Length      string    `json:"length"`
-	Thumbnail   string    `json:"thumbnail,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID        string    `json:"id"`
+	URL       string    `json:"url"`
+	Title     string    `json:"title"`
+	Author    string    `json:"author"`
+	Length    string    `json:"length"`
+	Thumbnail string    `json:"thumbnail,omitempty"`
+	Lines     []VideoLine `json:"lines,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type SummaryRecord struct {
-	ID          string    `json:"id"`
-	VideoID     string    `json:"video_id"`
-	Summary     string    `json:"summary"`
-	KeyPoints   string    `json:"key_points"`
-	Timestamps  string    `json:"timestamps"`
-	Tags        string    `json:"tags"`
-	Source      string    `json:"source"` // "deepseek" or "mock"
-	CreatedAt   time.Time `json:"created_at"`
+	ID         string    `json:"id"`
+	VideoID    string    `json:"video_id"`
+	Summary    string    `json:"summary"`
+	KeyPoints  string    `json:"key_points"`
+	Timestamps string    `json:"timestamps"`
+	Tags       string    `json:"tags"`
+	Source     string    `json:"source"` // "deepseek" or "mock"
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 type Store struct {
@@ -54,6 +60,8 @@ func (s *Store) initSchema() error {
 		title TEXT,
 		author TEXT,
 		length TEXT,
+		thumbnail TEXT,
+		lines TEXT,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 	CREATE TABLE IF NOT EXISTS summaries (
@@ -75,8 +83,16 @@ func (s *Store) initSchema() error {
 
 func (s *Store) SaveVideo(v *VideoInfo) error {
 	_, err := s.db.Exec(
-		"INSERT OR REPLACE INTO videos (id, url, title, author, length) VALUES (?, ?, ?, ?, ?)",
-		v.ID, v.URL, v.Title, v.Author, v.Length,
+		"INSERT OR REPLACE INTO videos (id, url, title, author, length, thumbnail) VALUES (?, ?, ?, ?, ?, ?)",
+		v.ID, v.URL, v.Title, v.Author, v.Length, v.Thumbnail,
+	)
+	return err
+}
+
+func (s *Store) SaveVideoWithLines(v *VideoInfo) error {
+	_, err := s.db.Exec(
+		"INSERT OR REPLACE INTO videos (id, url, title, author, length, thumbnail, lines) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		v.ID, v.URL, v.Title, v.Author, v.Length, v.Thumbnail, "",
 	)
 	return err
 }
@@ -119,10 +135,20 @@ func (s *Store) GetSummaries(limit int) ([]*SummaryRecord, error) {
 	return summaries, rows.Err()
 }
 
-func (s *Store) GetVideo(url string) (*VideoInfo, error) {
+func (s *Store) GetVideo(id string) (*VideoInfo, error) {
 	var v VideoInfo
-	err := s.db.QueryRow("SELECT id, url, title, author, length, created_at FROM videos WHERE url = ?", url).
-		Scan(&v.ID, &v.URL, &v.Title, &v.Author, &v.Length, &v.CreatedAt)
+	err := s.db.QueryRow("SELECT id, url, title, author, length, thumbnail, COALESCE(lines, '') FROM videos WHERE id = ?", id).
+		Scan(&v.ID, &v.URL, &v.Title, &v.Author, &v.Length, &v.Thumbnail, &v.Lines)
+	if err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func (s *Store) GetVideoByURL(url string) (*VideoInfo, error) {
+	var v VideoInfo
+	err := s.db.QueryRow("SELECT id, url, title, author, length, thumbnail, COALESCE(lines, '') FROM videos WHERE url = ?", url).
+		Scan(&v.ID, &v.URL, &v.Title, &v.Author, &v.Length, &v.Thumbnail, &v.Lines)
 	if err != nil {
 		return nil, err
 	}
