@@ -10,6 +10,7 @@ import {
   CommandLineIcon,
   EyeIcon,
   PlusIcon,
+  PlayCircleIcon,
 } from '@heroicons/react/24/outline';
 
 interface SummaryRecord {
