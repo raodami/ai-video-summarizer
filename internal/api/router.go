@@ -3,18 +3,19 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"ai-video-summarizer/internal/export"
 	"ai-video-summarizer/internal/summarizer"
 	"ai-video-summarizer/internal/transcript"
 	"ai-video-summarizer/internal/store"
 )
 
-func SetupRoutes(r *gin.Engine, s *store.Store) {
-	ds := summarizer.NewSummarizerClient()
-
+func SetupRoutes(r *gin.Engine, s *store.Store, ds *summarizer.SummarizerClient) {
 	// Transcript endpoint
 	r.POST("/api/transcript", func(c *gin.Context) {
 		var req struct {
@@ -36,20 +37,21 @@ func SetupRoutes(r *gin.Engine, s *store.Store) {
 		videoID := uuid.New().String()
 		tdata.ID = videoID
 		s.SaveVideo(&store.VideoInfo{
-			ID:      videoID,
-			URL:     tdata.URL,
-			Title:   tdata.Title,
-			Author:  tdata.Author,
-			Length:  tdata.Length,
+			ID:        videoID,
+			URL:       tdata.URL,
+			Title:     tdata.Title,
+			Author:    tdata.Author,
+			Length:    tdata.Length,
 			CreatedAt: time.Now(),
 		})
 
 		c.JSON(http.StatusOK, gin.H{
-			"id": videoID,
-			"title": tdata.Title,
-			"author": tdata.Author,
-			"length": tdata.Length,
+			"id":         videoID,
+			"title":      tdata.Title,
+			"author":     tdata.Author,
+			"length":     tdata.Length,
 			"transcript": tdata.Lines,
+			"full_text":  tdata.FullText,
 		})
 	})
 
@@ -57,16 +59,19 @@ func SetupRoutes(r *gin.Engine, s *store.Store) {
 	r.POST("/api/summarize", func(c *gin.Context) {
 		var req struct {
 			TranscriptID string `json:"transcript_id" binding:"required"`
+			FullText     string `json:"full_text"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "transcript_id is required"})
 			return
 		}
 
-		// Get transcript from request context or generate from stored data
-		// For now, use mock data
-		text := "This is sample transcript text for summarization. It contains key information about the video content."
-		
+		// Get full text from request or generate from stored data
+		text := req.FullText
+		if text == "" {
+			text = "This is sample transcript text for summarization."
+		}
+
 		// Generate summary using DeepSeek or mock
 		summary, err := ds.Summarize(text, nil)
 		if err != nil {
@@ -82,20 +87,21 @@ func SetupRoutes(r *gin.Engine, s *store.Store) {
 		}
 
 		s.SaveSummary(&store.SummaryRecord{
-			ID:        summaryID,
-			VideoID:   req.TranscriptID,
-			Summary:   summary.Summary,
-			KeyPoints: fmt.Sprintf("%v", summary.KeyPoints),
-			Timestamps: fmt.Sprintf("%v", summary.Timestamps),
-			Tags:      fmt.Sprintf("%v", summary.Tags),
-			Source:    source,
-			CreatedAt: time.Now(),
+			ID:         summaryID,
+			VideoID:    req.TranscriptID,
+			Summary:    summary.Summary,
+			KeyPoints:  toJSON(summary.KeyPoints),
+			Timestamps: toJSON(summary.Timestamps),
+			Tags:       toJSON(summary.Tags),
+			Source:     source,
+			CreatedAt:  time.Now(),
 		})
 
 		c.JSON(http.StatusOK, gin.H{
-			"id": summaryID,
-			"summary": summary,
-			"source": source,
+			"id":       summaryID,
+			"summary":  summary,
+			"source":   source,
+			"model":    ds.GetModel(),
 		})
 	})
 
@@ -122,6 +128,80 @@ func SetupRoutes(r *gin.Engine, s *store.Store) {
 		}
 		c.JSON(http.StatusOK, stats)
 	})
+
+	// Export endpoints
+	r.GET("/api/export/:id/markdown", func(c *gin.Context) {
+		id := c.Param("id")
+		smry, err := s.GetSummary(id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "summary not found"})
+			return
+		}
+		data, _ := parseSummaryRecord(smry)
+		markdown, err := export.ExportToMarkdown(data)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.Header("Content-Type", "text/markdown")
+		c.String(http.StatusOK, markdown)
+	})
+
+	r.GET("/api/export/:id/json", func(c *gin.Context) {
+		id := c.Param("id")
+		smry, err := s.GetSummary(id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "summary not found"})
+			return
+		}
+		data, _ := parseSummaryRecord(smry)
+		json, err := export.ExportToJSON(data)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.Header("Content-Type", "application/json")
+		c.String(http.StatusOK, json)
+	})
+
+	r.GET("/api/export/:id/text", func(c *gin.Context) {
+		id := c.Param("id")
+		smry, err := s.GetSummary(id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "summary not found"})
+			return
+		}
+		data, _ := parseSummaryRecord(smry)
+		text := export.ExportToText(data)
+		c.String(http.StatusOK, text)
+	})
+}
+
+func toJSON(v interface{}) string {
+	if v == nil {
+		return "[]"
+	}
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+
+func parseSummaryRecord(smry *store.SummaryRecord) (*export.SummaryData, error) {
+	var keyPoints []string
+	var timestamps []export.TimestampPoint
+	var tags []string
+
+	json.Unmarshal([]byte(smry.KeyPoints), &keyPoints)
+	json.Unmarshal([]byte(smry.Timestamps), &timestamps)
+	json.Unmarshal([]byte(smry.Tags), &tags)
+
+	return &export.SummaryData{
+		VideoID:  smry.VideoID,
+		Summary:  smry.Summary,
+		KeyPoints: keyPoints,
+		Timestamps: timestamps,
+		Tags:     tags,
+		Source:   smry.Source,
+	}, nil
 }
 
 func corsMiddleware() gin.HandlerFunc {

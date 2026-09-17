@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"ai-video-summarizer/internal/api"
+	"ai-video-summarizer/internal/summarizer"
 	"ai-video-summarizer/internal/store"
 )
 
@@ -34,9 +35,11 @@ func main() {
 	}
 	defer s.Close()
 
+	ds := summarizer.NewSummarizerClient()
+
 	r := gin.Default()
 	r.Use(corsMiddleware())
-	api.SetupRoutes(r, s)
+	api.SetupRoutes(r, s, ds)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -44,5 +47,6 @@ func main() {
 	}
 
 	log.Printf("AI Video Summarizer starting on :%s", port)
+	log.Printf("AI Provider: %s", ds.GetModel())
 	log.Fatal(r.Run(":" + port))
 }

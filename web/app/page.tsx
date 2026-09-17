@@ -1,11 +1,15 @@
 'use client';
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   PlayCircleIcon,
   DocumentTextIcon,
   ClipboardDocumentIcon,
   ArrowDownTrayIcon,
   SparklesIcon,
+  CommandLineIcon,
+  PhotoIcon,
+  PencilSquareIcon,
 } from '@heroicons/react/24/outline';
 import Link from 'next/link';
 
@@ -27,20 +31,25 @@ interface Result {
   author: string;
   length: string;
   transcript: TranscriptLine[];
+  full_text?: string;
 }
 
 export default function Home() {
+  const router = useRouter();
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [summarizing, setSummarizing] = useState(false);
   const [error, setError] = useState('');
+  const [source, setSource] = useState('');
 
   const handleExtract = async () => {
     if (!url) return;
     setLoading(true);
     setError('');
+    setResult(null);
+    setSummary(null);
     
     try {
       const res = await fetch('/api/transcript', {
@@ -65,12 +74,16 @@ export default function Home() {
   const handleSummarize = async () => {
     if (!result) return;
     setSummarizing(true);
+    setError('');
     
     try {
       const res = await fetch('/api/summarize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcript_id: result.id }),
+        body: JSON.stringify({ 
+          transcript_id: result.id,
+          full_text: result.full_text || result.transcript.map(l => l.text).join(' ')
+        }),
       });
       
       if (!res.ok) {
@@ -79,10 +92,19 @@ export default function Home() {
       
       const data = await res.json();
       setSummary(data.summary);
+      setSource(data.source);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setSummarizing(false);
+    }
+  };
+
+  const handleExport = async (format: string) => {
+    if (!result || !summary) return;
+    const windowRef = window.open(`/api/export/${result.id}/${format}`);
+    if (windowRef) {
+      windowRef.focus();
     }
   };
 
@@ -112,6 +134,7 @@ export default function Home() {
               placeholder="Paste YouTube URL here..."
               value={url}
               onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleExtract()}
               className="flex-1 px-6 py-4 bg-slate-900/50 border border-purple-500/30 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 text-lg"
             />
             <button
@@ -170,10 +193,35 @@ export default function Home() {
             {/* Summary */}
             {summary && (
               <div className="bg-slate-800/50 backdrop-blur rounded-2xl p-6 border border-purple-500/20">
-                <h3 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
-                  <SparklesIcon className="w-6 h-6 text-yellow-400" />
-                  AI Summary
-                </h3>
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-xl font-semibold text-white flex items-center gap-2">
+                    <SparklesIcon className="w-6 h-6 text-yellow-400" />
+                    AI Summary ({source})
+                  </h3>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleExport('markdown')}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm transition-all flex items-center gap-2"
+                    >
+                      <PencilSquareIcon className="w-4 h-4" />
+                      Markdown
+                    </button>
+                    <button
+                      onClick={() => handleExport('json')}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm transition-all flex items-center gap-2"
+                    >
+                      <CommandLineIcon className="w-4 h-4" />
+                      JSON
+                    </button>
+                    <button
+                      onClick={() => handleExport('text')}
+                      className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm transition-all flex items-center gap-2"
+                    >
+                      <DocumentTextIcon className="w-4 h-4" />
+                      Text
+                    </button>
+                  </div>
+                </div>
                 
                 {/* Summary Text */}
                 <div className="mb-6 p-4 bg-slate-900/50 rounded-xl">
@@ -238,8 +286,17 @@ export default function Home() {
             <div className="bg-slate-800/30 rounded-xl p-6 text-center">
               <ArrowDownTrayIcon className="w-12 h-12 text-green-400 mx-auto mb-4" />
               <h3 className="text-lg font-semibold text-white mb-2">Export & Share</h3>
-              <p className="text-gray-400">Download summaries in multiple formats</p>
+              <p className="text-gray-400">Download summaries in Markdown, JSON, or plain text</p>
             </div>
+          </div>
+        )}
+
+        {/* History Link */}
+        {result && (
+          <div className="mt-8 text-center">
+            <Link href="/history" className="text-purple-400 hover:text-purple-300 underline">
+              View History
+            </Link>
           </div>
         )}
       </div>

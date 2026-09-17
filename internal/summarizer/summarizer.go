@@ -61,6 +61,13 @@ func NewSummarizerClient() *SummarizerClient {
 	}
 }
 
+func (c *SummarizerClient) GetModel() string {
+	if c.APIKey != "" {
+		return "DeepSeek Chat"
+	}
+	return "Mock (no API key)"
+}
+
 func (c *SummarizerClient) Summarize(text string, options map[string]interface{}) (*SummaryResult, error) {
 	if c.APIKey == "" {
 		return c.generateMockSummary(text), nil
