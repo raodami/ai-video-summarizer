@@ -141,7 +141,7 @@ export default function History() {
                   </div>
                   <div className="flex gap-2">
                     <button
-                      onClick={() => setSelectedSummary(s.selectedSummary === s.id ? null : s)}
+                      onClick={() => setSelectedSummary(selectedSummary?.id === s.id ? null : s)}
                       className="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm transition-all flex items-center gap-1"
                     >
                       <EyeIcon className="w-4 h-4" />
