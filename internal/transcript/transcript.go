@@ -1,7 +1,6 @@
 package transcript
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -76,9 +75,9 @@ func parseTranscript(html, videoID string) (*TranscriptData, error) {
 	// 这里返回模拟数据用于演示
 	
 	// 尝试从HTML中提取转录数据
-	idx := strings.Index(html, '"captions":')
+	idx := strings.Index(html, `"captions":`)
 	if idx == -1 {
-		idx = strings.Index(html, '"playerCaptionsTracklistRenderer"')
+		idx = strings.Index(html, `"playerCaptionsTracklistRenderer"`)
 	}
 	
 	// 简化处理 - 返回示例数据
