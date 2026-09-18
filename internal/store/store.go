@@ -14,14 +14,14 @@ type VideoLine struct {
 }
 
 type VideoInfo struct {
-	ID        string    `json:"id"`
-	URL       string    `json:"url"`
-	Title     string    `json:"title"`
-	Author    string    `json:"author"`
-	Length    string    `json:"length"`
-	Thumbnail string    `json:"thumbnail,omitempty"`
-	Lines     []VideoLine `json:"lines,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string        `json:"id"`
+	URL       string        `json:"url"`
+	Title     string        `json:"title"`
+	Author    string        `json:"author"`
+	Length    string        `json:"length"`
+	Thumbnail string        `json:"thumbnail,omitempty"`
+	Lines     []VideoLine   `json:"lines,omitempty"`
+	CreatedAt time.Time     `json:"created_at"`
 }
 
 type SummaryRecord struct {
@@ -31,8 +31,16 @@ type SummaryRecord struct {
 	KeyPoints  string    `json:"key_points"`
 	Timestamps string    `json:"timestamps"`
 	Tags       string    `json:"tags"`
-	Source     string    `json:"source"` // "deepseek" or "mock"
+	Source     string    `json:"source"`
 	CreatedAt  time.Time `json:"created_at"`
+}
+
+type TranslationRecord struct {
+	ID           string    `json:"id"`
+	VideoID      string    `json:"video_id"`
+	Language     string    `json:"language"`
+	Translated   string    `json:"translated"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 type Store struct {
@@ -52,6 +60,10 @@ func New(dbPath string) (*Store, error) {
 	return store, nil
 }
 
+func NewStore(dbPath string) (*Store, error) {
+	return New(dbPath)
+}
+
 func (s *Store) initSchema() error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS videos (
@@ -64,6 +76,7 @@ func (s *Store) initSchema() error {
 		lines TEXT,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
+	
 	CREATE TABLE IF NOT EXISTS summaries (
 		id TEXT PRIMARY KEY,
 		video_id TEXT NOT NULL,
@@ -71,104 +84,129 @@ func (s *Store) initSchema() error {
 		key_points TEXT,
 		timestamps TEXT,
 		tags TEXT,
-		source TEXT DEFAULT 'mock',
+		source TEXT DEFAULT 'deepseek',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (video_id) REFERENCES videos(id)
 	);
-	CREATE INDEX IF NOT EXISTS idx_summaries_video ON summaries(video_id);
+	
+	CREATE TABLE IF NOT EXISTS translations (
+		id TEXT PRIMARY KEY,
+		video_id TEXT NOT NULL,
+		language TEXT NOT NULL,
+		translated TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (video_id) REFERENCES videos(id)
+	);
 	`
 	_, err := s.db.Exec(schema)
 	return err
 }
 
+// Video methods
 func (s *Store) SaveVideo(v *VideoInfo) error {
 	_, err := s.db.Exec(
-		"INSERT OR REPLACE INTO videos (id, url, title, author, length, thumbnail) VALUES (?, ?, ?, ?, ?, ?)",
-		v.ID, v.URL, v.Title, v.Author, v.Length, v.Thumbnail,
+		`INSERT OR REPLACE INTO videos (id, url, title, author, length, thumbnail, lines, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		v.ID, v.URL, v.Title, v.Author, v.Length, v.Thumbnail, 
+		fmt.Sprintf("%v", v.Lines), v.CreatedAt,
 	)
 	return err
 }
 
-func (s *Store) SaveVideoWithLines(v *VideoInfo) error {
-	_, err := s.db.Exec(
-		"INSERT OR REPLACE INTO videos (id, url, title, author, length, thumbnail, lines) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		v.ID, v.URL, v.Title, v.Author, v.Length, v.Thumbnail, "",
-	)
-	return err
-}
-
-func (s *Store) SaveSummary(smry *SummaryRecord) error {
-	_, err := s.db.Exec(
-		"INSERT INTO summaries (id, video_id, summary, key_points, timestamps, tags, source) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		smry.ID, smry.VideoID, smry.Summary, smry.KeyPoints, smry.Timestamps, smry.Tags, smry.Source,
-	)
-	return err
-}
-
-func (s *Store) GetSummary(id string) (*SummaryRecord, error) {
-	var smry SummaryRecord
+func (s *Store) GetVideo(id string) (*VideoInfo, error) {
+	v := &VideoInfo{}
 	err := s.db.QueryRow(
-		"SELECT id, video_id, summary, key_points, timestamps, tags, source, created_at FROM summaries WHERE id = ?",
-		id,
-	).Scan(&smry.ID, &smry.VideoID, &smry.Summary, &smry.KeyPoints, &smry.Timestamps, &smry.Tags, &smry.Source, &smry.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-	return &smry, nil
+		`SELECT id, url, title, author, length, COALESCE(thumbnail, ''), COALESCE(lines, ''), created_at 
+		 FROM videos WHERE id = ?`, id,
+	).Scan(&v.ID, &v.URL, &v.Title, &v.Author, &v.Length, &v.Thumbnail, &v.Lines, &v.CreatedAt)
+	return v, err
 }
 
-func (s *Store) GetSummaries(limit int) ([]*SummaryRecord, error) {
-	rows, err := s.db.Query("SELECT id, video_id, summary, key_points, timestamps, tags, source, created_at FROM summaries ORDER BY created_at DESC LIMIT ?", limit)
+func (s *Store) GetAllVideos(limit int) ([]*VideoInfo, error) {
+	rows, err := s.db.Query(`SELECT id, url, title, author, length, created_at FROM videos ORDER BY created_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	
+	var videos []*VideoInfo
+	for rows.Next() {
+		v := &VideoInfo{}
+		if err := rows.Scan(&v.ID, &v.URL, &v.Title, &v.Author, &v.Length, &v.CreatedAt); err != nil {
+			return nil, err
+		}
+		videos = append(videos, v)
+	}
+	return videos, nil
+}
 
+func (s *Store) GetStats() (totalVideos, totalSummaries, aiSummaries int, err error) {
+	err = s.db.QueryRow("SELECT COUNT(*) FROM videos").Scan(&totalVideos)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	err = s.db.QueryRow("SELECT COUNT(*) FROM summaries").Scan(&totalSummaries)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	err = s.db.QueryRow("SELECT COUNT(*) FROM summaries WHERE source = 'deepseek'").Scan(&aiSummaries)
+	return
+}
+
+// Summary methods
+func (s *Store) SaveSummary(sm *SummaryRecord) error {
+	_, err := s.db.Exec(
+		`INSERT INTO summaries (id, video_id, summary, key_points, timestamps, tags, source, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		sm.ID, sm.VideoID, sm.Summary, sm.KeyPoints, sm.Timestamps, sm.Tags, sm.Source, sm.CreatedAt,
+	)
+	return err
+}
+
+func (s *Store) GetSummaries(videoID string) ([]*SummaryRecord, error) {
+	rows, err := s.db.Query(`SELECT id, video_id, summary, key_points, timestamps, tags, source, created_at FROM summaries WHERE video_id = ? ORDER BY created_at DESC`, videoID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	
 	var summaries []*SummaryRecord
 	for rows.Next() {
-		var s SummaryRecord
-		if err := rows.Scan(&s.ID, &s.VideoID, &s.Summary, &s.KeyPoints, &s.Timestamps, &s.Tags, &s.Source, &s.CreatedAt); err != nil {
-			continue
+		sm := &SummaryRecord{}
+		if err := rows.Scan(&sm.ID, &sm.VideoID, &sm.Summary, &sm.KeyPoints, &sm.Timestamps, &sm.Tags, &sm.Source, &sm.CreatedAt); err != nil {
+			return nil, err
 		}
-		summaries = append(summaries, &s)
+		summaries = append(summaries, sm)
 	}
-	return summaries, rows.Err()
+	return summaries, nil
 }
 
-func (s *Store) GetVideo(id string) (*VideoInfo, error) {
-	var v VideoInfo
-	err := s.db.QueryRow("SELECT id, url, title, author, length, thumbnail, COALESCE(lines, '') FROM videos WHERE id = ?", id).
-		Scan(&v.ID, &v.URL, &v.Title, &v.Author, &v.Length, &v.Thumbnail, &v.Lines)
+// Translation methods
+func (s *Store) SaveTranslation(t *TranslationRecord) error {
+	_, err := s.db.Exec(
+		`INSERT INTO translations (id, video_id, language, translated, created_at)
+		 VALUES (?, ?, ?, ?, ?)`,
+		t.ID, t.VideoID, t.Language, t.Translated, t.CreatedAt,
+	)
+	return err
+}
+
+func (s *Store) GetTranslations(videoID string) ([]*TranslationRecord, error) {
+	rows, err := s.db.Query(`SELECT id, video_id, language, translated, created_at FROM translations WHERE video_id = ? ORDER BY created_at DESC`, videoID)
 	if err != nil {
 		return nil, err
 	}
-	return &v, nil
-}
-
-func (s *Store) GetVideoByURL(url string) (*VideoInfo, error) {
-	var v VideoInfo
-	err := s.db.QueryRow("SELECT id, url, title, author, length, thumbnail, COALESCE(lines, '') FROM videos WHERE url = ?", url).
-		Scan(&v.ID, &v.URL, &v.Title, &v.Author, &v.Length, &v.Thumbnail, &v.Lines)
-	if err != nil {
-		return nil, err
-	}
-	return &v, nil
-}
-
-func (s *Store) GetStats() (map[string]interface{}, error) {
-	var videoCount int
-	var summaryCount int
-	var deepseekCount int
+	defer rows.Close()
 	
-	s.db.QueryRow("SELECT COUNT(*) FROM videos").Scan(&videoCount)
-	s.db.QueryRow("SELECT COUNT(*) FROM summaries").Scan(&summaryCount)
-	s.db.QueryRow("SELECT COUNT(*) FROM summaries WHERE source = 'deepseek'").Scan(&deepseekCount)
-
-	return map[string]interface{}{
-		"total_videos":   videoCount,
-		"total_summaries": summaryCount,
-		"ai_summaries":   deepseekCount,
-	}, nil
+	var translations []*TranslationRecord
+	for rows.Next() {
+		t := &TranslationRecord{}
+		if err := rows.Scan(&t.ID, &t.VideoID, &t.Language, &t.Translated, &t.CreatedAt); err != nil {
+			return nil, err
+		}
+		translations = append(translations, t)
+	}
+	return translations, nil
 }
 
 func (s *Store) Close() error {
